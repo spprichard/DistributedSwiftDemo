@@ -12,13 +12,15 @@ import DistributedCluster
 
 extension App {
     enum Distributed {
-        typealias DefaultActorSystem = LocalTestingDistributedActorSystem
+        // typealias DefaultActorSystem = LocalTestingDistributedActorSystem
+        typealias DefaultActorSystem = WebSocketActorSystem
 
         static func runDistributedLLM() async throws {
             let configuration = LLM.defaultConfiguration
             let generationParameters = LLM.defaultGenerationParameters
             
-            let system = DefaultActorSystem()
+            // let system = try DefaultActorSystem()
+            let system = try DefaultActorSystem(mode: .serverOnly(host: "localhost", port: 9000))
             let loader = Distributed.ModelLoader()
             
             let model = try await loader.loadModel(configuration: configuration)
