@@ -17,18 +17,22 @@ extension App {
             @ActorID.Metadata(\.receptionID)
             var receptionID: String
             
-            private let greeting: String
+            private let greetingService: GreetingService
             
-            init(greeting: String, actorSystem: ActorSystem) async {
+            init(
+                greetingService: GreetingService,
+                actorSystem: ActorSystem
+            ) async {
                 self.actorSystem = actorSystem
-                self.greeting = greeting
+                self.greetingService = greetingService
                 self.receptionID = "*"
                 
                 await actorSystem.receptionist.checkIn(self)
             }
             
-            distributed func echo(_ name: String) -> String {
-                "echo: \(self.greeting)\(name)! (from node: \(self.id.node), id: \(self.id.detailedDescription))"
+            distributed func echo(_ name: String) async throws -> String {
+                let greeting = try await greetingService.greet(name: name)
+                return "[ECHO]: \(greeting) - (from node: \(self.id.node), id: \(self.id.detailedDescription))"
             }
         }
         
@@ -47,7 +51,7 @@ extension App {
                 await actorSystem.receptionist.checkIn(self)
             }
             
-            distributed func greet(name: String) -> String {
+            distributed func greet(name: String) async throws -> String {
                 return "\(greeting) \(name) - (from node: \(self.id.node), id: \(self.id.detailedDescription))"
             }
         }
@@ -61,10 +65,13 @@ extension App {
             return system
         }
         
-        static func createEchoServices(count: Int, with actorSystem: ClusterSystem) async -> [EchoService] {
+        static func createServices(count: Int, with actorSystem: ClusterSystem) async -> [EchoService] {
             var services: [EchoService] = []
-            for i in 0..<count {
-                let e = await EchoService(greeting: "Echo \(i) -> ", actorSystem: actorSystem)
+            for _ in 0..<count {
+                let e = await EchoService(
+                    greetingService: GreetingService(actorSystem: actorSystem),
+                    actorSystem: actorSystem
+                )
                 services.append(e)
             }
             
@@ -92,10 +99,10 @@ extension App {
             root.cluster.join(endpoint: node3.cluster.endpoint)
             let cluster = [root, node1, node2, node3]
             
-            let echoServices = await createEchoServices(count: 3, with: node1)
-            let moreEchoServices = await createEchoServices(count: 5, with: node2)
-            let greetingServices = await createGreetingServices(count: 3, with: node3)
-            let moreGreetingServices = await createGreetingServices(count: 10, with: root)
+            let echoServices = await createServices(count: 3, with: node1)
+            let moreServices = await createServices(count: 5, with: node2)
+            let andMoreServices = await createServices(count: 3, with: node3)
+            let andEvenMoreServices = await createServices(count: 10, with: root)
             
             Task {
                 for try await echoActor in await root.receptionist.listing(of: EchoService.self) {
@@ -107,20 +114,17 @@ extension App {
             try await MultiNodeCluster.ensureCluster(cluster, within: .seconds(10))
             print("✅ Cluster running!")
             
-            startWorking(echoServices + moreEchoServices, greetingServices + moreGreetingServices)
+            startWorking(echoServices + moreServices + andMoreServices + andEvenMoreServices)
             try await root.terminated
         }
         
-        static func startWorking(_ echoServices: [EchoService], _ greetingServices: [GreetingService]) {
+        static func startWorking(_ services: [EchoService]) {
             Task {
                 while true {
                     try await Task.sleep(for: .seconds(3))
-                    guard let echoService = echoServices.randomElement() else { continue }
-                    let response = try await echoService.echo("Request \(Int.random(in: 0...1000))")
+                    guard let service = services.randomElement() else { continue }
+                    let response = try await service.echo("Request \(Int.random(in: 0...1000))")
                     print(response)
-                    guard let greetingService = greetingServices.randomElement() else { continue }
-                    let greeting = try await greetingService.greet(name: "Maya")
-                    print(greeting)
                 }
             }
         }
